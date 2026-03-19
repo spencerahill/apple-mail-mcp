@@ -13,6 +13,7 @@ from apple_mail_mcp.core import (
     skip_folders_condition,
 )
 from apple_mail_mcp.constants import (
+    FLAG_COLOR_MAP,
     SKIP_FOLDERS,
     NEWSLETTER_PLATFORM_PATTERNS,
     NEWSLETTER_KEYWORD_PATTERNS,
@@ -420,3 +421,152 @@ def search_emails(
         return json.dumps(emails, indent=2)
 
     return raw
+
+
+@mcp.tool()
+@inject_preferences
+def get_flagged_emails(
+    account: str,
+    flag_color: str = "any",
+    max_results: int = 50,
+    include_content: bool = False,
+    max_content_length: int = 300
+) -> str:
+    """
+    Get all flagged emails across all mailboxes in an account, optionally filtered by flag color.
+
+    Uses efficient 'whose' clause filtering so even accounts with hundreds of mailboxes
+    return results in seconds.
+
+    Args:
+        account: Account name to search in (e.g., "CCNY", "LDEO")
+        flag_color: Color to filter by: "any", "red", "orange", "yellow", "green", "blue", "purple", "gray"
+        max_results: Maximum number of results to return (default: 50)
+        include_content: Whether to include email content preview (default: False)
+        max_content_length: Maximum content length in characters (default: 300, 0 = unlimited)
+
+    Returns:
+        Formatted list of flagged emails with flag color, subject, sender, date, and mailbox
+    """
+    if flag_color != "any" and flag_color.lower() not in FLAG_COLOR_MAP:
+        valid = ", ".join(["any"] + list(FLAG_COLOR_MAP.keys()))
+        return f"Error: Invalid flag_color '{flag_color}'. Valid values: {valid}"
+
+    escaped_account = escape_applescript(account)
+
+    if flag_color == "any":
+        whose_clause = "whose flag index is not -1"
+    else:
+        flag_idx = FLAG_COLOR_MAP[flag_color.lower()]
+        whose_clause = f"whose flag index is {flag_idx}"
+
+    skip_cond = skip_folders_condition("mbName")
+
+    content_script = ''
+    if include_content:
+        limit_check = f'length of cleanText > {max_content_length}' if max_content_length > 0 else 'false'
+        truncate = f'text 1 thru {max_content_length} of cleanText & "..."' if max_content_length > 0 else 'cleanText'
+        content_script = f'''
+                            try
+                                set msgContent to content of aMsg
+                                set AppleScript's text item delimiters to {{return, linefeed}}
+                                set contentParts to text items of msgContent
+                                set AppleScript's text item delimiters to " "
+                                set cleanText to contentParts as string
+                                set AppleScript's text item delimiters to ""
+                                if {limit_check} then
+                                    set contentPreview to {truncate}
+                                else
+                                    set contentPreview to cleanText
+                                end if
+                                set outputText to outputText & "   Content: " & contentPreview & return
+                            on error
+                                set outputText to outputText & "   Content: [Not available]" & return
+                            end try
+        '''
+
+    color_labels = '''
+                            set flagIdx to flag index of aMsg
+                            if flagIdx is 0 then
+                                set flagLabel to "Red"
+                            else if flagIdx is 1 then
+                                set flagLabel to "Orange"
+                            else if flagIdx is 2 then
+                                set flagLabel to "Yellow"
+                            else if flagIdx is 3 then
+                                set flagLabel to "Green"
+                            else if flagIdx is 4 then
+                                set flagLabel to "Blue"
+                            else if flagIdx is 5 then
+                                set flagLabel to "Purple"
+                            else if flagIdx is 6 then
+                                set flagLabel to "Gray"
+                            else
+                                set flagLabel to "Flag " & flagIdx
+                            end if
+    '''
+
+    script = f'''
+    tell application "Mail"
+        set outputText to "FLAGGED EMAILS" & return
+        set outputText to outputText & "Account: {escaped_account}" & return
+        set outputText to outputText & "Filter: {flag_color}" & return & return
+        set resultCount to 0
+
+        try
+            set targetAccount to account "{escaped_account}"
+
+            repeat with mb in (every mailbox of targetAccount)
+                if resultCount >= {max_results} then exit repeat
+
+                try
+                    set mbName to name of mb
+
+                    if {skip_cond} then
+                        set flaggedMsgs to (every message of mb {whose_clause})
+
+                        repeat with aMsg in flaggedMsgs
+                            if resultCount >= {max_results} then exit repeat
+
+                            try
+                                set msgSubject to subject of aMsg
+                                set msgSender to sender of aMsg
+                                set msgDate to date received of aMsg
+                                set msgRead to read status of aMsg
+
+                                {color_labels}
+
+                                if msgRead then
+                                    set readIndicator to "✓"
+                                else
+                                    set readIndicator to "✉"
+                                end if
+
+                                set outputText to outputText & readIndicator & " [" & flagLabel & "] " & msgSubject & return
+                                set outputText to outputText & "   From: " & msgSender & return
+                                set outputText to outputText & "   Date: " & (msgDate as string) & return
+                                set outputText to outputText & "   Mailbox: " & mbName & return
+
+                                {content_script}
+
+                                set outputText to outputText & return
+                                set resultCount to resultCount + 1
+                            end try
+                        end repeat
+                    end if
+                end try
+            end repeat
+
+            set outputText to outputText & "========================================" & return
+            set outputText to outputText & "FOUND: " & resultCount & " flagged email(s)" & return
+            set outputText to outputText & "========================================" & return
+
+        on error errMsg
+            return "Error: " & errMsg
+        end try
+
+        return outputText
+    end tell
+    '''
+
+    return run_applescript(script)

@@ -18,6 +18,13 @@ SKIP_FOLDERS = [
     "Spam", "Deleted Messages",
 ]
 
+# Flag color mapping (zero-indexed, empirically confirmed on macOS Sequoia)
+FLAG_COLOR_MAP = {
+    "red": 0, "orange": 1, "yellow": 2, "green": 3,
+    "blue": 4, "purple": 5, "gray": 6,
+}
+FLAG_INDEX_TO_COLOR = {v: k for k, v in FLAG_COLOR_MAP.items()}
+
 # Thread subject prefixes to strip when matching threads
 THREAD_PREFIXES = ["Re:", "Fwd:", "FW:", "RE:", "Fw:"]
 
