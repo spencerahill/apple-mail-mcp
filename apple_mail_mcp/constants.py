@@ -14,8 +14,8 @@ NEWSLETTER_KEYWORD_PATTERNS = [
 # Folders to skip during broad searches
 SKIP_FOLDERS = [
     "Trash", "Junk", "Junk Email", "Deleted Items",
-    "Sent", "Sent Items", "Sent Messages", "Drafts",
-    "Spam", "Deleted Messages",
+    "Sent", "Sent Items", "Sent Messages", "Sent Mail",
+    "Drafts", "Spam", "Deleted Messages", "All Mail", "Bin",
 ]
 
 # Flag color mapping (zero-indexed, empirically confirmed on macOS Sequoia)

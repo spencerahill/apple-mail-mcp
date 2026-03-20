@@ -12,6 +12,7 @@ from apple_mail_mcp.core import (
     build_mailbox_ref,
     build_filter_condition,
 )
+from apple_mail_mcp.constants import FLAG_COLOR_MAP
 
 
 @mcp.tool()
@@ -124,7 +125,8 @@ def save_email_attachment(
     account: str,
     subject_keyword: str,
     attachment_name: str,
-    save_path: str
+    save_path: str,
+    mailbox: str = "INBOX"
 ) -> str:
     """
     Save a specific attachment from an email to disk.
@@ -134,6 +136,7 @@ def save_email_attachment(
         subject_keyword: Keyword to search for in email subjects
         attachment_name: Name of the attachment to save
         save_path: Full path where to save the attachment
+        mailbox: Mailbox to search in (default: "INBOX"). Supports nested paths like "proposals/2026-03_nasa-compass"
 
     Returns:
         Confirmation message with save location
@@ -179,11 +182,11 @@ def save_email_attachment(
 
         try
             set targetAccount to account "{escaped_account}"
-            {inbox_mailbox_script("inboxMailbox", "targetAccount")}
-            set inboxMessages to every message of inboxMailbox
+            {build_mailbox_ref(mailbox, account_var="targetAccount", var_name="targetMailbox")}
+            set targetMessages to every message of targetMailbox
             set foundAttachment to false
 
-            repeat with aMessage in inboxMessages
+            repeat with aMessage in targetMessages
                 try
                     set messageSubject to subject of aMessage
 
@@ -247,7 +250,8 @@ def update_email_status(
 
     Args:
         account: Account name (e.g., "Gmail", "Work")
-        action: Action to perform: "mark_read", "mark_unread", "flag", "unflag"
+        action: Action to perform: "mark_read", "mark_unread", "flag", "unflag",
+                "flag_red", "flag_orange", "flag_yellow", "flag_green", "flag_blue", "flag_purple", "flag_gray"
         subject_keyword: Optional keyword to filter emails by subject
         sender: Optional sender to filter emails by
         mailbox: Mailbox to search in (default: "INBOX")
@@ -284,8 +288,17 @@ def update_email_status(
     elif action == "unflag":
         action_script = 'set flagged status of aMessage to false'
         action_label = "Unflagged"
+    elif action.startswith("flag_"):
+        color_name = action[5:]  # strip "flag_" prefix
+        if color_name not in FLAG_COLOR_MAP:
+            valid = ", ".join(f"flag_{c}" for c in FLAG_COLOR_MAP.keys())
+            return f"Error: Invalid action '{action}'. Color flag actions: {valid}"
+        flag_idx = FLAG_COLOR_MAP[color_name]
+        action_script = f'set flag index of aMessage to {flag_idx}'
+        action_label = f"Flagged {color_name.capitalize()}"
     else:
-        return f"Error: Invalid action '{action}'. Use: mark_read, mark_unread, flag, unflag"
+        valid_actions = "mark_read, mark_unread, flag, unflag, flag_red, flag_orange, flag_yellow, flag_green, flag_blue, flag_purple, flag_gray"
+        return f"Error: Invalid action '{action}'. Use: {valid_actions}"
 
     script = f'''
     tell application "Mail"

@@ -4,7 +4,7 @@ import os
 from typing import Optional, List, Dict, Any
 
 from apple_mail_mcp.server import mcp
-from apple_mail_mcp.core import inject_preferences, escape_applescript, run_applescript, inbox_mailbox_script
+from apple_mail_mcp.core import inject_preferences, escape_applescript, run_applescript, inbox_mailbox_script, build_mailbox_ref
 from apple_mail_mcp.constants import SKIP_FOLDERS
 
 
@@ -13,6 +13,7 @@ from apple_mail_mcp.constants import SKIP_FOLDERS
 def list_email_attachments(
     account: str,
     subject_keyword: str,
+    mailbox: str = "INBOX",
     max_results: int = 1
 ) -> str:
     """
@@ -21,6 +22,7 @@ def list_email_attachments(
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal")
         subject_keyword: Keyword to search for in email subjects
+        mailbox: Mailbox to search in (default: "INBOX"). Supports nested paths like "proposals/2026-03_nasa-compass"
         max_results: Maximum number of matching emails to check (default: 1)
 
     Returns:
@@ -38,8 +40,8 @@ def list_email_attachments(
 
         try
             set targetAccount to account "{escaped_account}"
-            {inbox_mailbox_script("inboxMailbox", "targetAccount")}
-            set inboxMessages to every message of inboxMailbox
+            {build_mailbox_ref(mailbox, account_var="targetAccount", var_name="targetMailbox")}
+            set inboxMessages to every message of targetMailbox
 
             repeat with aMessage in inboxMessages
                 if resultCount >= {max_results} then exit repeat

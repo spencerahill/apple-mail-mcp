@@ -460,7 +460,10 @@ def get_flagged_emails(
         flag_idx = FLAG_COLOR_MAP[flag_color.lower()]
         whose_clause = f"whose flag index is {flag_idx}"
 
-    skip_cond = skip_folders_condition("mbName")
+    # For flagged emails, include Sent/Drafts — users flag sent messages to track responses
+    flagged_skip = ["Trash", "Junk", "Junk Email", "Deleted Items", "Spam", "Deleted Messages", "All Mail", "Bin"]
+    flagged_skip_list = ', '.join(f'"{f}"' for f in flagged_skip)
+    skip_cond = f'mbName is not in {{{flagged_skip_list}}}'
 
     content_script = ''
     if include_content:
