@@ -309,6 +309,7 @@ def bulk_move_emails(
     subject_keyword: Optional[str] = None,
     sender: Optional[str] = None,
     from_mailbox: str = "INBOX",
+    to_account: Optional[str] = None,
     older_than_days: Optional[int] = None,
     max_emails: int = 50,
     dry_run: bool = False,
@@ -325,6 +326,7 @@ def bulk_move_emails(
         subject_keyword: Optional keyword to filter emails by subject
         sender: Optional sender email/name to filter by
         from_mailbox: Source mailbox (default: "INBOX")
+        to_account: Destination account name for cross-account moves. If omitted, moves within the same account.
         older_than_days: Only affect emails older than N days
         max_emails: Maximum number of emails to move (safety limit, default: 50)
         dry_run: If True, preview what would be moved without acting (default: False)
@@ -342,15 +344,26 @@ def bulk_move_emails(
     date_setup, date_condition = _date_filter_script(older_than_days)
     source_setup = _mailbox_fallback_script("sourceMailbox", from_mailbox)
 
+    # Determine destination account variable name
+    dest_account_var = "targetAccount"
+    if to_account:
+        dest_account_var = "destAccount"
+
     # Build nested mailbox reference for destination
     mailbox_parts = to_mailbox.split("/")
     if len(mailbox_parts) > 1:
         dest_ref = f'mailbox "{escape_applescript(mailbox_parts[-1])}" of '
         for i in range(len(mailbox_parts) - 2, -1, -1):
             dest_ref += f'mailbox "{escape_applescript(mailbox_parts[i])}" of '
-        dest_ref += "targetAccount"
+        dest_ref += dest_account_var
     else:
-        dest_ref = f'mailbox "{escape_applescript(to_mailbox)}" of targetAccount'
+        dest_ref = f'mailbox "{escape_applescript(to_mailbox)}" of {dest_account_var}'
+
+    # Build optional destination account setup
+    dest_account_setup = ""
+    if to_account:
+        safe_to_account = escape_applescript(to_account)
+        dest_account_setup = f'set destAccount to account "{safe_to_account}"'
 
     mode_label = "DRY RUN - PREVIEW MOVE" if dry_run else "MOVING EMAILS"
     safe_from = escape_applescript(from_mailbox)
@@ -369,6 +382,7 @@ def bulk_move_emails(
 
         try
             set targetAccount to account "{safe_account}"
+            {dest_account_setup}
             {source_setup}
             {dest_setup}
             {date_setup}

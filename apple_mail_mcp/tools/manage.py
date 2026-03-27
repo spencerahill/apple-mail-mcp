@@ -22,6 +22,7 @@ def move_email(
     subject_keyword: str,
     to_mailbox: str,
     from_mailbox: str = "INBOX",
+    to_account: Optional[str] = None,
     max_moves: int = 1
 ) -> str:
     """
@@ -32,6 +33,7 @@ def move_email(
         subject_keyword: Keyword to search for in email subjects
         to_mailbox: Destination mailbox name. For nested mailboxes, use "/" separator (e.g., "Projects/Amplify Impact")
         from_mailbox: Source mailbox name (default: "INBOX")
+        to_account: Destination account name for cross-account moves. If omitted, moves within the same account.
         max_moves: Maximum number of emails to move (default: 1, safety limit)
 
     Returns:
@@ -44,6 +46,11 @@ def move_email(
     safe_from_mailbox = escape_applescript(from_mailbox)
     safe_to_mailbox = escape_applescript(to_mailbox)
 
+    # Determine destination account variable name
+    dest_account_var = "targetAccount"
+    if to_account:
+        dest_account_var = "destAccount"
+
     # Parse nested mailbox path
     mailbox_parts = to_mailbox.split('/')
 
@@ -53,9 +60,15 @@ def move_email(
         dest_mailbox_script = f'mailbox "{escape_applescript(mailbox_parts[-1])}" of '
         for i in range(len(mailbox_parts) - 2, -1, -1):
             dest_mailbox_script += f'mailbox "{escape_applescript(mailbox_parts[i])}" of '
-        dest_mailbox_script += 'targetAccount'
+        dest_mailbox_script += dest_account_var
     else:
-        dest_mailbox_script = f'mailbox "{safe_to_mailbox}" of targetAccount'
+        dest_mailbox_script = f'mailbox "{safe_to_mailbox}" of {dest_account_var}'
+
+    # Build optional destination account setup
+    dest_account_setup = ""
+    if to_account:
+        safe_to_account = escape_applescript(to_account)
+        dest_account_setup = f'set destAccount to account "{safe_to_account}"'
 
     script = f'''
     tell application "Mail"
@@ -64,6 +77,7 @@ def move_email(
 
         try
             set targetAccount to account "{safe_account}"
+            {dest_account_setup}
             -- Try to get source mailbox (handle both "INBOX"/"Inbox" variations)
             try
                 set sourceMailbox to mailbox "{safe_from_mailbox}" of targetAccount
@@ -96,7 +110,7 @@ def move_email(
                         set outputText to outputText & "✓ Moved: " & messageSubject & return
                         set outputText to outputText & "  From: " & messageSender & return
                         set outputText to outputText & "  Date: " & (messageDate as string) & return
-                        set outputText to outputText & "  {safe_from_mailbox} → {safe_to_mailbox}" & return & return
+                        set outputText to outputText & "  {safe_account}/{safe_from_mailbox} → {escape_applescript(to_account or account)}/{safe_to_mailbox}" & return & return
 
                         set movedCount to movedCount + 1
                     end if

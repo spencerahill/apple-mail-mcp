@@ -6,8 +6,8 @@ import tempfile
 from typing import Optional, List, Tuple
 
 
-from apple_mail_mcp.server import mcp, READ_ONLY
-from apple_mail_mcp.core import inject_preferences, escape_applescript, run_applescript, inbox_mailbox_script
+from apple_mail_mcp.server import mcp, READ_ONLY, DRAFT_ONLY
+from apple_mail_mcp.core import inject_preferences, escape_applescript, run_applescript, inbox_mailbox_script, build_mailbox_ref
 
 
 def _send_html_email(
@@ -233,7 +233,8 @@ def reply_to_email(
     bcc: Optional[str] = None,
     send: bool = True,
     mode: Optional[str] = None,
-    attachments: Optional[str] = None
+    attachments: Optional[str] = None,
+    mailbox: str = "INBOX"
 ) -> str:
     """
     Reply to an email matching a subject keyword.
@@ -248,6 +249,7 @@ def reply_to_email(
         send: If True (default), send immediately; if False, save as draft. Ignored if mode is set.
         mode: Delivery mode — "send" (send immediately), "draft" (save silently), or "open" (open compose window for review). Overrides send parameter when set.
         attachments: Optional file paths to attach, comma-separated for multiple (e.g., "/path/to/file1.png,/path/to/file2.pdf")
+        mailbox: Mailbox to search in (default: "INBOX"). Supports nested paths with "/" separator (e.g., "advising/haochang-luo")
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
@@ -321,6 +323,10 @@ def reply_to_email(
     else:
         effective_mode = "send" if send else "draft"
 
+    # Draft-only mode: force draft regardless of requested mode
+    if DRAFT_ONLY and effective_mode != "draft":
+        effective_mode = "draft"
+
     # Read body from temp file in AppleScript (avoids all string escaping issues)
     read_body_script = f'set replyBodyText to do shell script "cat " & quoted form of "{body_temp_path}"'
 
@@ -356,7 +362,10 @@ def reply_to_email(
         success_text = "Reply saved as draft!"
         # For draft, we must manually build the quoted original because
         # close-window-saving-yes saves the content property literally
-        # and the reply message's content property is initially empty
+        # and the reply message's content property is initially empty.
+        # NOTE: This breaks threading for non-inbox messages. The mailbox
+        # parameter works for "open" and "send" modes but draft mode has
+        # known limitations.
         set_content_script = '''set origContent to content of foundMessage
                 set origSender to sender of foundMessage
                 set origDate to date received of foundMessage
@@ -374,7 +383,7 @@ def reply_to_email(
             {read_body_script}
 
             set targetAccount to account "{safe_account}"
-            {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+            {build_mailbox_ref(mailbox, account_var="targetAccount", var_name="inboxMailbox")}
             set inboxMessages to every message of inboxMailbox
             set foundMessage to missing value
 
@@ -505,6 +514,10 @@ def compose_email(
     # Validate mode
     if mode not in ("send", "draft", "open"):
         return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
+
+    # Draft-only mode: force draft regardless of requested mode
+    if DRAFT_ONLY and mode != "draft":
+        mode = "draft"
 
     # Validate and resolve attachments early
     attachment_script = ''
@@ -781,10 +794,10 @@ def forward_email(
                     set content of forwardMessage to "{escaped_message}" & return & return & content of forwardMessage
                 end if
 
-                -- Send the forward
-                send forwardMessage
+                -- Send or save as draft
+                {"close window 1 saving yes" if DRAFT_ONLY else "send forwardMessage"}
 
-                set outputText to outputText & "✓ Email forwarded successfully!" & return & return
+                set outputText to outputText & "{"✓ Forward saved as draft!" if DRAFT_ONLY else "✓ Email forwarded successfully!"}" & return & return
                 set outputText to outputText & "Original email:" & return
                 set outputText to outputText & "  Subject: " & messageSubject & return
                 set outputText to outputText & "  From: " & messageSender & return
@@ -883,6 +896,8 @@ def manage_drafts(
         '''
 
     elif action == "create":
+        if READ_ONLY:
+            return "Error: Creating drafts is disabled in read-only mode."
         if not subject or not to or not body:
             return "Error: 'subject', 'to', and 'body' are required for creating drafts"
 
@@ -957,8 +972,8 @@ def manage_drafts(
         '''
 
     elif action == "send":
-        if READ_ONLY:
-            return "Error: Sending drafts is disabled in read-only mode."
+        if READ_ONLY or DRAFT_ONLY:
+            return "Error: Sending is disabled in read-only/draft-only mode."
         if not draft_subject:
             return "Error: 'draft_subject' is required for sending drafts"
 
