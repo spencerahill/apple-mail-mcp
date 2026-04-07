@@ -249,6 +249,55 @@ def list_accounts() -> List[str]:
 
 @mcp.tool()
 @inject_preferences
+def fetch_new_mail(
+    account: Optional[str] = None,
+    wait_seconds: int = 15,
+) -> dict:
+    """
+    Trigger Mail.app to fetch new messages from the server(s), then wait briefly
+    for the sync to settle before returning. Use this before search/list calls
+    that need to see today's newly-arrived mail.
+
+    Args:
+        account: Account name to refresh (e.g., "CCNY"). If None, refreshes all accounts.
+        wait_seconds: Seconds to wait after triggering the fetch (default 15).
+                      AppleScript's `check for new mail` is asynchronous, so this
+                      gives Mail time to actually pull messages from the server.
+
+    Returns:
+        Dict with status, account scope, and elapsed seconds.
+    """
+    import time
+
+    if account:
+        escaped = escape_applescript(account)
+        script = f'''
+        tell application "Mail"
+            launch
+            set acct to first account whose name is "{escaped}"
+            check for new mail for acct
+        end tell
+        '''
+    else:
+        script = '''
+        tell application "Mail"
+            launch
+            check for new mail
+        end tell
+        '''
+
+    start = time.time()
+    run_applescript(script)
+    time.sleep(wait_seconds)
+    return {
+        "status": "ok",
+        "account": account or "all",
+        "elapsed_seconds": round(time.time() - start, 1),
+    }
+
+
+@mcp.tool()
+@inject_preferences
 def get_recent_emails(
     account: str,
     count: int = 10,

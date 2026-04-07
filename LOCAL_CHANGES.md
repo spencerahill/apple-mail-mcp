@@ -11,6 +11,7 @@ Changes maintained on top of upstream (patrickfreyer/apple-mail-mcp):
 7. **MCP config** (~/.claude/.mcp.json) — `--draft-only` flag to force compose/reply/forward into draft mode
 8. **Draft-only mode** (apple_mail_mcp.py, server.py, compose.py) — New `--draft-only` CLI flag: compose/reply/forward tools stay available but are forced to save as draft, never send. `--read-only` is now truly read-only (also blocks draft creation). The two flags are mutually exclusive.
 9. **reply_to_email mailbox parameter** (compose.py) — `mailbox` param (default "INBOX") so replies can target emails in any mailbox (e.g., Sent Items, advising/haochang-luo). Uses `build_mailbox_ref()` for nested path support. NOTE: draft mode has known threading limitations for non-inbox messages (AppleScript `set content` breaks Mail's HTML threading layer). Works correctly in "open" and "send" modes.
+10. **fetch_new_mail tool** (inbox.py) — Triggers Mail.app's "Get All New Mail" via AppleScript `check for new mail`, then sleeps `wait_seconds` (default 15) for the async sync to settle. Optional `account` parameter scopes to one account. Used by `/inbox-triage` (and intended for `/daily-review`, `/stale-check`) so queries see today's mail instead of running between Mail's poll cycles. Uses `launch` not `activate` to avoid stealing focus.
 
 ## Rebase workflow
 
@@ -41,3 +42,4 @@ After rebasing onto upstream, verify each item above is present:
 - [ ] forward_email saves as draft instead of sending when DRAFT_ONLY (compose.py)
 - [ ] manage_drafts blocks "create" when READ_ONLY, blocks "send" when READ_ONLY or DRAFT_ONLY (compose.py)
 - [ ] `reply_to_email` has `mailbox` parameter using `build_mailbox_ref()` (compose.py)
+- [ ] `fetch_new_mail` tool exists in inbox.py (with `account` and `wait_seconds` parameters)
