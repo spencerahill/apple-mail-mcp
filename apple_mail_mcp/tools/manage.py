@@ -11,6 +11,8 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     build_mailbox_ref,
     build_filter_condition,
+    build_cross_account_move,
+    source_trash_setup,
 )
 from apple_mail_mcp.constants import FLAG_COLOR_MAP
 
@@ -70,6 +72,12 @@ def move_email(
         safe_to_account = escape_applescript(to_account)
         dest_account_setup = f'set destAccount to account "{safe_to_account}"'
 
+    # Cross-account moves on Gmail sources need duplicate + source-trash to
+    # durably strip the server-side \\Inbox label (see build_cross_account_move).
+    cross = bool(to_account)
+    per_msg_move = build_cross_account_move(cross)
+    src_trash = source_trash_setup(cross)
+
     script = f'''
     tell application "Mail"
         set outputText to "MOVING EMAILS" & return & return
@@ -91,6 +99,7 @@ def move_email(
 
             -- Get destination mailbox (handles nested mailboxes)
             set destMailbox to {dest_mailbox_script}
+            {src_trash}
             set sourceMessages to every message of sourceMailbox
 
             repeat with aMessage in sourceMessages
@@ -104,8 +113,9 @@ def move_email(
                         set messageSender to sender of aMessage
                         set messageDate to date received of aMessage
 
-                        -- Move the message
-                        move aMessage to destMailbox
+                        -- Move the message (cross-account: duplicate + trash
+                        -- source so Gmail's server-side \\Inbox label is stripped)
+                        {per_msg_move}
 
                         set outputText to outputText & "✓ Moved: " & messageSubject & return
                         set outputText to outputText & "  From: " & messageSender & return

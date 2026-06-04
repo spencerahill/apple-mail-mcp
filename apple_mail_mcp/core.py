@@ -211,6 +211,54 @@ def build_mailbox_ref(
             end try'''
 
 
+def build_cross_account_move(
+    cross_account: bool,
+    message_var: str = "aMessage",
+    dest_var: str = "destMailbox",
+    src_trash_var: str = "srcTrash",
+) -> str:
+    """Return the per-message AppleScript that relocates a message to *dest_var*.
+
+    Same-account moves use a plain ``move`` — Exchange folders and real Gmail
+    labels both drop the source ``\\Inbox`` label correctly.
+
+    Cross-account moves need special handling. A plain ``move`` from a Gmail/IMAP
+    source copies the message to the destination account but does **not** strip
+    the server-side ``\\Inbox`` label from the source, so the message reverts to
+    the source INBOX on the next sync (Gmail has no real "Archive"/folders, only
+    labels). The reliable recipe is to ``duplicate`` the message to the
+    destination, then ``move`` the original into the *source* account's Trash —
+    Trash is the one operation that strips all Gmail labels server-side, so the
+    source inbox is cleared durably while the copy persists on the destination.
+    """
+    if not cross_account:
+        return f"move {message_var} to {dest_var}"
+    return (
+        f"duplicate {message_var} to {dest_var}\n"
+        f"                            move {message_var} to {src_trash_var}"
+    )
+
+
+def source_trash_setup(
+    cross_account: bool,
+    account_var: str = "targetAccount",
+    var_name: str = "srcTrash",
+) -> str:
+    """Return AppleScript that resolves the *source* account's Trash mailbox.
+
+    Only needed for cross-account moves (see :func:`build_cross_account_move`).
+    Falls back to "Deleted Items" for Exchange-style accounts that don't expose
+    a "Trash" mailbox. Returns an empty string for same-account moves.
+    """
+    if not cross_account:
+        return ""
+    return f'''try
+                set {var_name} to mailbox "Trash" of {account_var}
+            on error
+                set {var_name} to mailbox "Deleted Items" of {account_var}
+            end try'''
+
+
 def build_filter_condition(
     subject: str | None = None,
     sender: str | None = None,

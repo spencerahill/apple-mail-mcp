@@ -3,7 +3,13 @@
 from typing import Optional
 
 from apple_mail_mcp.server import mcp
-from apple_mail_mcp.core import inject_preferences, escape_applescript, run_applescript
+from apple_mail_mcp.core import (
+    inject_preferences,
+    escape_applescript,
+    run_applescript,
+    build_cross_account_move,
+    source_trash_setup,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -368,12 +374,18 @@ def bulk_move_emails(
     mode_label = "DRY RUN - PREVIEW MOVE" if dry_run else "MOVING EMAILS"
     safe_from = escape_applescript(from_mailbox)
     safe_to = escape_applescript(to_mailbox)
-    move_action = "" if dry_run else """
-                            move aMessage to destMailbox"""
 
-    # Only resolve dest mailbox when actually moving
+    # Cross-account moves on Gmail sources need duplicate + source-trash to
+    # durably strip the server-side \\Inbox label (see build_cross_account_move).
+    cross = bool(to_account)
+    move_action = "" if dry_run else (
+        "\n                            " + build_cross_account_move(cross)
+    )
+
+    # Only resolve dest mailbox (and source Trash for cross-account) when moving
     dest_setup = "" if dry_run else f"""
             set destMailbox to {dest_ref}"""
+    src_trash_setup_str = "" if dry_run else source_trash_setup(cross)
 
     script = f'''
     tell application "Mail"
@@ -385,6 +397,7 @@ def bulk_move_emails(
             {dest_account_setup}
             {source_setup}
             {dest_setup}
+            {src_trash_setup_str}
             {date_setup}
 
             set mailboxMessages to every message of sourceMailbox
