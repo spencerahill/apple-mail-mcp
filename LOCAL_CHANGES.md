@@ -16,6 +16,8 @@ Changes maintained on top of upstream (patrickfreyer/apple-mail-mcp):
 12. **Message-ID in search/flagged output** (search.py): `search_emails` and `get_flagged_emails` now fetch `message id of aMessage` (the RFC822 Message-ID, per-message try with empty-string fallback) and include it in all output formats. Text output gains a `Message-ID:` line; the JSON pipe format carries it at fixed position 6 (before the optional content field), parsed into a `message_id` key by `_parse_pipe_output`. Added 2026-06-10 for the exec-asst Phase 3c flagged-mail/org-cache dedup, so real ids replace the synthetic `<backfill-stub:…@local>` ingestion stubs going forward.
 13. **get_flagged_emails JSON output** (search.py): `output_format="json"` pipe mode mirroring `search_emails`, parsed by `_parse_flagged_pipe_output`. Record fields: subject, sender, date, is_read, mailbox, message_id, flag_color (lowercased label), content (optional, last position); `account` is injected Python-side from the tool parameter. Text mode is unchanged. Added 2026-06-10 so the exec-asst flag-snapshot pipeline (`plans/flag-cache-unification.md`) consumes structured data instead of parsing prose.
 
+14. **Unicode-preserving output sanitization** (core.py): `_sanitize_for_json` no longer forces ASCII (upstream's `encode('ascii', 'replace')` turned every non-ASCII char into `?`: accented sender names, curly quotes, and the U+00A0/U+202F spaces Mail puts in subjects and formatted dates). It now only normalizes line endings and strips control characters; JSON-RPC escapes non-ASCII at serialization time, so the wire stays safe. Fixed 2026-06-11 because the `?`-mangled subjects broke the exec-asst flag-snapshot subject matching.
+
 ## Rebase workflow
 
 ```bash
@@ -49,3 +51,4 @@ After rebasing onto upstream, verify each item above is present:
 - [ ] `build_cross_account_move` and `source_trash_setup` exist in core.py; `move_email` and `bulk_move_emails` cross-account paths use duplicate + source-Trash (manage.py, bulk.py)
 - [ ] `search_emails` and `get_flagged_emails` fetch `message id` and emit it in text (`Message-ID:` line) and pipe/JSON (`message_id` key, position 6) output; `_parse_pipe_output` parses it (search.py)
 - [ ] `get_flagged_emails` has `output_format="json"` with `flag_color` + `message_id` keys; `_parse_flagged_pipe_output` exists (search.py)
+- [ ] `_sanitize_for_json` preserves Unicode (no ascii-replace pass) (core.py)
