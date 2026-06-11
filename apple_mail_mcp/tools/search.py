@@ -165,7 +165,8 @@ def _parse_pipe_output(raw: str) -> list[dict[str, Any]]:
                 "is_read": parts[3].strip().lower() == "true",
                 "account": parts[4].strip(),
                 "mailbox": parts[5].strip(),
-                "content": parts[6].strip() if len(parts) > 6 else "",
+                "message_id": parts[6].strip() if len(parts) > 6 else "",
+                "content": parts[7].strip() if len(parts) > 7 else "",
             })
     return emails
 
@@ -319,7 +320,7 @@ def search_emails(
     # --- Output record (per matching message) ---
     if output_format == "json":
         record_script = f"""
-                                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailboxName{content_pipe_field}
+                                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailboxName & "|||" & messageId{content_pipe_field}
         """
         output_setup = "set resultLines to {}"
         output_return = """
@@ -343,6 +344,7 @@ def search_emails(
                                     set outputText to outputText & "   Date: " & (messageDate as string) & return
                                     set outputText to outputText & "   Account: " & accountName & return
                                     set outputText to outputText & "   Mailbox: " & mailboxName & return
+                                    set outputText to outputText & "   Message-ID: " & messageId & return
                                     {content_text_line}
                                     set outputText to outputText & return
         """
@@ -393,6 +395,11 @@ def search_emails(
                                 set messageSender to sender of aMessage
                                 set messageDate to date received of aMessage
                                 set messageRead to read status of aMessage
+                                try
+                                    set messageId to message id of aMessage
+                                on error
+                                    set messageId to ""
+                                end try
 
                                 {post_filter_start}
                                     {content_script}
@@ -446,7 +453,7 @@ def get_flagged_emails(
         max_content_length: Maximum content length in characters (default: 300, 0 = unlimited)
 
     Returns:
-        Formatted list of flagged emails with flag color, subject, sender, date, and mailbox
+        Formatted list of flagged emails with flag color, subject, sender, date, mailbox, and RFC822 Message-ID
     """
     if flag_color != "any" and flag_color.lower() not in FLAG_COLOR_MAP:
         valid = ", ".join(["any"] + list(FLAG_COLOR_MAP.keys()))
@@ -536,6 +543,11 @@ def get_flagged_emails(
                                 set msgSender to sender of aMsg
                                 set msgDate to date received of aMsg
                                 set msgRead to read status of aMsg
+                                try
+                                    set msgMessageId to message id of aMsg
+                                on error
+                                    set msgMessageId to ""
+                                end try
 
                                 {color_labels}
 
@@ -549,6 +561,7 @@ def get_flagged_emails(
                                 set outputText to outputText & "   From: " & msgSender & return
                                 set outputText to outputText & "   Date: " & (msgDate as string) & return
                                 set outputText to outputText & "   Mailbox: " & mbName & return
+                                set outputText to outputText & "   Message-ID: " & msgMessageId & return
 
                                 {content_script}
 
