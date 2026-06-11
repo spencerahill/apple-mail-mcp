@@ -171,6 +171,35 @@ def _parse_pipe_output(raw: str) -> list[dict[str, Any]]:
     return emails
 
 
+def _parse_flagged_pipe_output(raw: str, account: str) -> list[dict[str, Any]]:
+    """Parse pipe-delimited flagged-email output into list of dicts.
+
+    Field order: subject, sender, date, is_read, mailbox, message_id,
+    flag_color, content (optional). The account is a tool parameter, not
+    part of the AppleScript record, so it is injected here.
+    """
+    emails: list[dict[str, Any]] = []
+    if not raw:
+        return emails
+    for line in raw.split("\n"):
+        if "|||" not in line:
+            continue
+        parts = line.split("|||")
+        if len(parts) >= 7:
+            emails.append({
+                "subject": parts[0].strip(),
+                "sender": parts[1].strip(),
+                "date": parts[2].strip(),
+                "is_read": parts[3].strip().lower() == "true",
+                "account": account,
+                "mailbox": parts[4].strip(),
+                "message_id": parts[5].strip(),
+                "flag_color": parts[6].strip().lower(),
+                "content": parts[7].strip() if len(parts) > 7 else "",
+            })
+    return emails
+
+
 # ---------------------------------------------------------------------------
 # The single consolidated search tool
 # ---------------------------------------------------------------------------
@@ -437,7 +466,8 @@ def get_flagged_emails(
     flag_color: str = "any",
     max_results: int = 50,
     include_content: bool = False,
-    max_content_length: int = 300
+    max_content_length: int = 300,
+    output_format: str = "text"
 ) -> str:
     """
     Get all flagged emails across all mailboxes in an account, optionally filtered by flag color.
@@ -451,9 +481,11 @@ def get_flagged_emails(
         max_results: Maximum number of results to return (default: 50)
         include_content: Whether to include email content preview (default: False)
         max_content_length: Maximum content length in characters (default: 300, 0 = unlimited)
+        output_format: "text" for human-readable output, "json" for structured data
 
     Returns:
-        Formatted list of flagged emails with flag color, subject, sender, date, mailbox, and RFC822 Message-ID
+        Flagged emails with flag color, subject, sender, date, read status, mailbox, and
+        RFC822 Message-ID, formatted as text or JSON
     """
     if flag_color != "any" and flag_color.lower() not in FLAG_COLOR_MAP:
         valid = ", ".join(["any"] + list(FLAG_COLOR_MAP.keys()))
@@ -489,9 +521,8 @@ def get_flagged_emails(
                                 else
                                     set contentPreview to cleanText
                                 end if
-                                set outputText to outputText & "   Content: " & contentPreview & return
                             on error
-                                set outputText to outputText & "   Content: [Not available]" & return
+                                set contentPreview to "[Not available]"
                             end try
         '''
 
@@ -516,11 +547,48 @@ def get_flagged_emails(
                             end if
     '''
 
+    if output_format == "json":
+        content_pipe = ' & "|||" & contentPreview' if include_content else ''
+        output_setup = 'set resultLines to {}'
+        record_script = f'''
+                                set end of resultLines to msgSubject & "|||" & msgSender & "|||" & (msgDate as string) & "|||" & msgRead & "|||" & mbName & "|||" & msgMessageId & "|||" & flagLabel{content_pipe}
+        '''
+        output_return = '''
+        set AppleScript's text item delimiters to linefeed
+        return resultLines as string
+        '''
+    else:
+        content_text_line = ''
+        if include_content:
+            content_text_line = 'set outputText to outputText & "   Content: " & contentPreview & return'
+        output_setup = f'''set outputText to "FLAGGED EMAILS" & return
+        set outputText to outputText & "Account: {escaped_account}" & return
+        set outputText to outputText & "Filter: {flag_color}" & return & return'''
+        record_script = f'''
+                                if msgRead then
+                                    set readIndicator to "✓"
+                                else
+                                    set readIndicator to "✉"
+                                end if
+
+                                set outputText to outputText & readIndicator & " [" & flagLabel & "] " & msgSubject & return
+                                set outputText to outputText & "   From: " & msgSender & return
+                                set outputText to outputText & "   Date: " & (msgDate as string) & return
+                                set outputText to outputText & "   Mailbox: " & mbName & return
+                                set outputText to outputText & "   Message-ID: " & msgMessageId & return
+                                {content_text_line}
+                                set outputText to outputText & return
+        '''
+        output_return = '''
+        set outputText to outputText & "========================================" & return
+        set outputText to outputText & "FOUND: " & resultCount & " flagged email(s)" & return
+        set outputText to outputText & "========================================" & return
+        return outputText
+        '''
+
     script = f'''
     tell application "Mail"
-        set outputText to "FLAGGED EMAILS" & return
-        set outputText to outputText & "Account: {escaped_account}" & return
-        set outputText to outputText & "Filter: {flag_color}" & return & return
+        {output_setup}
         set resultCount to 0
 
         try
@@ -551,21 +619,9 @@ def get_flagged_emails(
 
                                 {color_labels}
 
-                                if msgRead then
-                                    set readIndicator to "✓"
-                                else
-                                    set readIndicator to "✉"
-                                end if
-
-                                set outputText to outputText & readIndicator & " [" & flagLabel & "] " & msgSubject & return
-                                set outputText to outputText & "   From: " & msgSender & return
-                                set outputText to outputText & "   Date: " & (msgDate as string) & return
-                                set outputText to outputText & "   Mailbox: " & mbName & return
-                                set outputText to outputText & "   Message-ID: " & msgMessageId & return
-
                                 {content_script}
 
-                                set outputText to outputText & return
+                                {record_script}
                                 set resultCount to resultCount + 1
                             end try
                         end repeat
@@ -573,16 +629,20 @@ def get_flagged_emails(
                 end try
             end repeat
 
-            set outputText to outputText & "========================================" & return
-            set outputText to outputText & "FOUND: " & resultCount & " flagged email(s)" & return
-            set outputText to outputText & "========================================" & return
-
         on error errMsg
             return "Error: " & errMsg
         end try
 
-        return outputText
+        {output_return}
     end tell
     '''
 
-    return run_applescript(script)
+    raw = run_applescript(script)
+
+    if output_format == "json":
+        if raw.startswith("Error"):
+            return raw
+        emails = _parse_flagged_pipe_output(raw, account)
+        return json.dumps(emails, indent=2)
+
+    return raw
